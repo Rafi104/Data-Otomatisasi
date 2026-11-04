@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Maket sprinkler otomatis 3D</title>
+<style>
+:root{--bg:#10161c;--panel:#1a232c;--line:#2c3a47;--text:#e8eef3;--mute:#93a4b3;--ok:#4cc38a;--hot:#ff6a3d;--blue:#4aa8ff;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+#c:active{cursor:grabbing}
+.lbl{position:fixed;left:0;top:0;font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(16,22,28,.82);border:1px solid var(--line);color:var(--text);pointer-events:none;white-space:nowrap;transform:translate(-50%,-100%)}
+#hud{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;pointer-events:none}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;pointer-events:auto}
+#status{flex:1 1 260px}
+#status h2{margin:0 0 6px;font-size:15px;font-weight:650}
+.row{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:3px 0;color:var(--mute)}
+.row b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.row.on b{color:var(--hot)}
+#ctl{display:flex;flex-direction:column;gap:8px;justify-content:center;flex:0 0 auto}
+button{font:inherit;font-size:14px;padding:9px 14px;border-radius:8px;border:1px solid var(--line);background:#24313d;color:var(--text);cursor:pointer;min-width:150px}
+button.go{background:var(--hot);border-color:var(--hot);color:#1a0b05;font-weight:650}
+button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+select{font:inherit;font-size:14px;padding:9px;border-radius:8px;border:1px solid var(--line);background:#24313d;color:var(--text)}
+#top{position:fixed;left:12px;top:calc(12px + env(safe-area-inset-top,0px));max-width:300px}
+#top h1{margin:0 0 4px;font-size:16px;font-weight:650}
+#top p{margin:0;font-size:12.5px;line-height:1.45;color:var(--mute)}
+@media(max-width:600px){#top{max-width:none;right:12px}#top p{display:none}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="labels"></div>
+<div id="top" class="box"><h1>Uji skenario sprinkler 3D</h1><p>Seret untuk memutar, scroll atau cubit untuk zoom. Pilih skenario lalu tekan Jalankan. Logika sama dengan simulasi.py: voting 2 dari 3 (api, asap di atas 300 ppm, suhu di atas 42 °C).</p></div>
+<div id="hud">
+  <div id="status" class="box">
+    <h2 id="st">Siaga</h2>
+    <div class="row" id="r1"><span>Sensor api (IR)</span><b id="v1">Aman</b></div>
+    <div class="row" id="r2"><span>Asap/gas MQ-2</span><b id="v2">120 ppm</b></div>
+    <div class="row" id="r3"><span>Suhu DHT22</span><b id="v3">29 °C</b></div>
+    <div class="row"><span>Sensor mendukung</span><b id="vote">0 dari 3</b></div>
+    <div class="row"><span>Waktu respons</span><b id="rt">-</b></div>
+    <div class="row"><span>Level air tandon</span><b id="wl">100%</b></div>
+    <div class="row"><span>Hasil uji</span><b id="vd">-</b></div>
+    <div id="res" style="font-size:12px;color:var(--mute);white-space:pre-line"></div>
+  </div>
+  <div id="ctl" class="box">
+    <select id="sc" aria-label="Skenario"><option value="api">Api sungguhan</option><option value="tanpa_api">Tanpa api</option><option value="asap_masak">Asap masak</option><option value="sinar_matahari">Sinar matahari</option><option value="hari_panas">Hari panas</option><option value="api_air_rendah">Api, air rendah</option></select>
+    <button class="go" id="bFire">Jalankan skenario</button>
+    <button id="bAll">Jalankan semua</button>
+    <button id="bReset">Reset</button>
+    <button id="bLbl">Sembunyikan label</button>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const T=THREE,cv=document.getElementById('c');
+const R=new T.WebGLRenderer({canvas:cv,antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));
+const S=new T.Scene();S.background=new T.Color(0x10161c);S.fog=new T.Fog(0x10161c,22,45);
+const C=new T.PerspectiveCamera(45,1,.1,100);
+S.add(new T.HemisphereLight(0xbcd4ff,0x223040,.9));
+const dl=new T.DirectionalLight(0xffffff,.8);dl.position.set(6,10,6);S.add(dl);
+const fl=new T.PointLight(0xff7a30,0,7);fl.position.set(3.5,1.6,1.2);S.add(fl);
+
+function M(c,o){return new T.MeshStandardMaterial(Object.assign({color:c,roughness:.7,metalness:.1},o||{}))}
+function box(w,h,d,c,x,y,z,o){const m=new T.Mesh(new T.BoxGeometry(w,h,d),M(c,o));m.position.set(x,y,z);S.add(m);return m}
+function cyl(r,h,c,x,y,z,o,seg){const m=new T.Mesh(new T.CylinderGeometry(r,r,h,seg||24),M(c,o));m.position.set(x,y,z);S.add(m);return m}
+
+// papan dasar
+box(12,.2,7.4,0xb58b5a,0,0,0);
+const grid=new T.GridHelper(40,40,0x1e2a35,0x1e2a35);grid.position.y=-.1;S.add(grid);
+
+// tandon air
+const tank=box(2.4,1.7,2.4,0x9fd4ff,-4.2,.95,-1.4,{transparent:true,opacity:.18,roughness:.2});
+const tEdge=new T.LineSegments(new T.EdgesGeometry(tank.geometry),new T.LineBasicMaterial({color:0x7fc0f5}));tEdge.position.copy(tank.position);S.add(tEdge);
+const water=box(2.3,1,2.3,0x2e86de,-4.2,.8,-1.4,{transparent:true,opacity:.7,roughness:.1});
+const pump=cyl(.22,.5,0x2b2f36,-4.7,.45,-1.4);
+const pumpCap=cyl(.1,.2,0x888f99,-4.7,.8,-1.4);
+// ultrasonic HC-SR04 di atas tandon
+const us=box(.9,.35,.12,0x1f6fb5,-4.2,1.95,-1.4);
+[-.25,.25].forEach(x=>{const e=cyl(.14,.1,0xcfd5db,-4.2+x,1.95,-1.3);e.rotation.x=Math.PI/2});
+cyl(.04,.4,0x888,-4.2,1.78,-1.4);
+
+// pipa dan nozzle
+const path=new T.CatmullRomCurve3([new T.Vector3(-4.7,.9,-1.4),new T.Vector3(-4.7,2.7,-1.4),new T.Vector3(-3.6,3.1,-1),new T.Vector3(0,3.2,.4),new T.Vector3(3.5,3,1.2),new T.Vector3(3.5,2.6,1.2)]);
+const pipe=new T.Mesh(new T.TubeGeometry(path,60,.07,10),M(0x3a3f48,{roughness:.4}));S.add(pipe);
+const noz=new T.Mesh(new T.ConeGeometry(.2,.3,16),M(0xd0a23a,{metalness:.6,roughness:.3}));noz.position.set(3.5,2.5,1.2);noz.rotation.x=Math.PI;S.add(noz);
+
+// elektronik
+const esp=box(1.7,.1,.9,0x15191f,0,.15,-2.4);box(.55,.06,.55,0xb9c0c8,.4,.23,-2.4,{metalness:.7});
+const espLed=box(.08,.06,.08,0x4aa8ff,-.6,.22,-2.2,{emissive:0x4aa8ff,emissiveIntensity:.8});
+const relay=box(.9,.35,.7,0x1c5fc2,-1.9,.3,-2.4);
+const relayLed=box(.1,.08,.1,0x225533,-1.6,.5,-2.2,{emissive:0x000000});
+const lm=box(.7,.25,.45,0x1a6b74,1.8,.22,-2.5);
+const adp=box(.9,.5,.6,0x24272b,3.2,.32,-2.5);
+box(1.6,.04,.7,0x2a2f36,-0.2,.12,2.4);// breadboard
+const buzz=cyl(.2,.25,0x111,-.7,.3,2.4);
+const led=cyl(.1,.2,0x401010,.1,.3,2.4,{emissive:0x000000});
+const ledG=cyl(.1,.2,0x104020,.5,.3,2.4,{emissive:0x22aa55,emissiveIntensity:.6});
+
+// rak sensor
+const sensors={};
+function post(x,name,c,wx,o){box(.08,1.1,.08,0x666,x,.65,-.3);const b=box(.55,.4,.12,c,x,1.3,-.25,o);return b}
+sensors.f1=post(1.5,'f1',0x7a1f1f);sensors.f2=post(2.15,'f2',0x7a1f1f);
+sensors.mq=post(2.8,'mq',0x1b4f8a);sensors.dht=post(3.45,'dht',0xe8eaec);
+[sensors.f1,sensors.f2].forEach(b=>{const l=cyl(.09,.12,0x222,b.position.x,b.position.y,-.15,{emissive:0x000000});l.rotation.x=Math.PI/2;b.lens=l});
+
+// kabel
+function wire(a,b,c){const m=new T.Vector3((a.x+b.x)/2,Math.max(a.y,b.y)+.4,(a.z+b.z)/2);const g=new T.BufferGeometry().setFromPoints(new T.QuadraticBezierCurve3(a,m,b).getPoints(24));S.add(new T.Line(g,new T.LineBasicMaterial({color:c})))}
+const ep=new T.Vector3(0,.2,-2.4);
+wire(ep,new T.Vector3(1.5,.95,-.3),0xff5050);wire(ep,new T.Vector3(2.15,.95,-.3),0xff8080);
+wire(ep,new T.Vector3(2.8,.95,-.3),0xf2c94c);wire(ep,new T.Vector3(3.45,.95,-.3),0x4cc38a);
+wire(ep,new T.Vector3(-1.9,.4,-2.4),0x4aa8ff);wire(ep,new T.Vector3(-4.2,1.95,-1.4),0xa78bfa);
+wire(new T.Vector3(-1.9,.4,-2.2),new T.Vector3(-4.7,.5,-1.4),0xff9f43);wire(ep,new T.Vector3(-.2,.15,2.4),0xe056fd);
+
+// area api
+cyl(1.1,.12,0x3a3a3a,3.5,.1,1.2,{metalness:.5});
+const candle=cyl(.18,.8,0xf1e6cf,3.5,.55,1.2);
+const flame=new T.Group();flame.position.set(3.5,.95,1.2);S.add(flame);
+const f1=new T.Mesh(new T.ConeGeometry(.3,1,16),new T.MeshBasicMaterial({color:0xff6a1a,transparent:true,opacity:.85}));f1.position.y=.5;
+const f2=new T.Mesh(new T.ConeGeometry(.17,.65,16),new T.MeshBasicMaterial({color:0xffe066}));f2.position.y=.35;
+flame.add(f1,f2);flame.visible=false;
+const sun=new T.Mesh(new T.SphereGeometry(.5,24,16),new T.MeshBasicMaterial({color:0xffd24a}));sun.position.set(2.2,3,2.6);sun.visible=false;S.add(sun);
+
+// partikel air
+const N=260,wp=new Float32Array(N*3),wv=new Float32Array(N*3),wl=new Float32Array(N);
+const wg=new T.BufferGeometry();wg.setAttribute('position',new T.BufferAttribute(wp,3));
+const wpts=new T.Points(wg,new T.PointsMaterial({color:0x7fc8ff,size:.09,transparent:true,opacity:.9}));wpts.frustumCulled=false;S.add(wpts);
+for(let i=0;i<N;i++){wp[i*3+1]=-50;wl[i]=Math.random()*-1}
+// partikel asap
+const K=70,sp=new Float32Array(K*3),sl=new Float32Array(K);
+const sg=new T.BufferGeometry();sg.setAttribute('position',new T.BufferAttribute(sp,3));
+const spts=new T.Points(sg,new T.PointsMaterial({color:0x9aa3ab,size:.4,transparent:true,opacity:.35,depthWrite:false}));spts.frustumCulled=false;S.add(spts);
+for(let i=0;i<K;i++){sp[i*3+1]=-50;sl[i]=Math.random()}
+
+// label
+const LB=[['ESP32 DevKit',0,.55,-2.4],['Relay 1 channel',-1.9,.8,-2.4],['Step-down LM2596',1.8,.6,-2.5],['Adaptor 12 V 2 A',3.2,.8,-2.5],
+['Tandon air',-4.2,2.5,-1.4],['HC-SR04 level air',-4.2,2.3,-1.4],['Pompa celup 12 V',-4.7,.2,-1.4],['Nozzle spray',3.5,2.9,1.2],
+['Flame sensor 1',1.5,1.7,-.3],['Flame sensor 2',2.15,1.7,-.3],['MQ-2',2.8,1.7,-.3],['DHT22',3.45,1.7,-.3],
+['Buzzer',-.7,.7,2.4],['LED alarm',.1,.65,2.4],['Titik api uji',3.5,2.1,1.2]];
+const lw=document.getElementById('labels'),lbs=LB.map(a=>{const d=document.createElement('div');d.className='lbl';d.textContent=a[0];lw.appendChild(d);return{d,p:new T.Vector3(a[1],a[2],a[3])}});
+let showL=true;
+
+// kamera orbit
+let th=.75,ph=1.05,dist=15;const tg=new T.Vector3(-.3,.9,0);
+function cam(){C.position.set(tg.x+dist*Math.sin(ph)*Math.cos(th),tg.y+dist*Math.cos(ph),tg.z+dist*Math.sin(ph)*Math.sin(th));C.lookAt(tg)}
+const pts=new Map();let pd=0;
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);pts.set(e.pointerId,[e.clientX,e.clientY])});
+cv.addEventListener('pointerup',e=>pts.delete(e.pointerId));cv.addEventListener('pointercancel',e=>pts.delete(e.pointerId));
+cv.addEventListener('pointermove',e=>{if(!pts.has(e.pointerId))return;const o=pts.get(e.pointerId);
+ if(pts.size===2){const q=[...pts.entries()].find(a=>a[0]!==e.pointerId)[1];const d0=Math.hypot(o[0]-q[0],o[1]-q[1]);const d1=Math.hypot(e.clientX-q[0],e.clientY-q[1]);dist=Math.min(28,Math.max(6,dist*d0/d1))}
+ else{th-=(e.clientX-o[0])*.007;ph=Math.min(1.5,Math.max(.25,ph-(e.clientY-o[1])*.007))}
+ pts.set(e.pointerId,[e.clientX,e.clientY])});
+cv.addEventListener('wheel',e=>{e.preventDefault();dist=Math.min(28,Math.max(6,dist*(1+e.deltaY*.001)))},{passive:false});
+
+// simulasi
+const SC={api:{fire:1},tanpa_api:{},asap_masak:{mq:450,temp:33},sinar_matahari:{flame:1},hari_panas:{temp:44},api_air_rendah:{fire:1,water:.08}};
+const NM={api:'Api sungguhan',tanpa_api:'Tanpa api',asap_masak:'Asap masak',sinar_matahari:'Sinar matahari',hari_panas:'Hari panas',api_air_rendah:'Api, air rendah'};
+let cur={},queue=[],res=[];
+const st={burning:false,fire:0,mq:120,temp:29,alarm:false,pump:false,water:1,t:0,tIg:0,rt:null,tOut:null,act:false,fin:null,ever:false,sc:'',ta:0,v:0};
+function reset(){Object.assign(st,{burning:false,fire:0,mq:120,temp:29,alarm:false,pump:false,water:1,rt:null,tOut:null,act:false,fin:null,ever:false});cur={}}
+function start(n){reset();cur=SC[n];Object.assign(st,{act:true,sc:n,ta:st.t,water:cur.water||1});if(cur.fire){st.burning=true;st.fire=.02;st.tIg=st.t}document.getElementById('sc').value=n}
+function clr(){queue=[];res=[];document.getElementById('res').textContent=''}
+document.getElementById('bFire').onclick=()=>{clr();start(document.getElementById('sc').value)};
+document.getElementById('bAll').onclick=()=>{clr();queue=Object.keys(SC);start(queue.shift())};
+document.getElementById('bReset').onclick=()=>{clr();reset()};
+function verdict(){if(!st.act)return['-',false];const el=st.t-st.ta;
+ if(cur.fire&&!cur.water){if(st.tOut!==null&&!st.alarm&&!st.pump)return st.rt!==null&&st.rt<=10?['LULUS (respons '+st.rt.toFixed(1)+' dtk)',true]:['GAGAL',true];return['Berjalan...',false]}
+ if(cur.fire){if(st.alarm&&!st.pump&&st.water<=.05&&el>4)return['LULUS (alarm tetap, pompa berhenti)',true];return['Berjalan...',false]}
+ if(el>15)return st.ever?['GAGAL (alarm palsu)',true]:['LULUS (tanpa alarm palsu)',true];return['Berjalan...',false]}
+document.getElementById('bLbl').onclick=e=>{showL=!showL;lw.style.display=showL?'':'none';e.target.textContent=showL?'Sembunyikan label':'Tampilkan label'};
+const $=id=>document.getElementById(id);
+function setE(m,c,i){m.material.emissive.setHex(c);m.material.emissiveIntensity=i}
+
+function step(dt){
+ st.t+=dt;
+ if(st.pump)st.fire=Math.max(0,st.fire-dt*.4);else if(st.burning)st.fire=Math.min(1,st.fire+dt*.45);
+ if(st.burning&&st.pump&&st.fire<=0){st.burning=false;st.tOut=st.t}
+ if(st.tOut!==null){if(st.t-st.tOut>1.2)st.pump=false;if(st.t-st.tOut>3)st.alarm=false}
+ const A=st.act;st.mq+=(((A&&cur.mq)||(120+st.fire*650))-st.mq)*dt*.55;
+ st.temp+=(((A&&cur.temp)||(29+st.fire*32))-st.temp)*dt*.3;
+ const a=st.fire>.35||!!(A&&cur.flame),b=st.mq>300,c=st.temp>42,v=a+b+c;st.v=v;
+ if(!st.alarm&&st.tOut===null&&v>=2){st.alarm=true;st.ever=true;st.pump=true;if(st.burning)st.rt=st.t-st.tIg}
+ if(st.pump)st.water=Math.max(.05,st.water-dt*.045);
+ if(st.pump&&st.water<=.05)st.pump=false;
+ // UI
+ $('v1').textContent=a?'Terdeteksi':'Aman';$('r1').className='row'+(a?' on':'');
+ $('v2').textContent=Math.round(st.mq)+' ppm';$('r2').className='row'+(b?' on':'');
+ $('v3').textContent=st.temp.toFixed(1)+' °C';$('r3').className='row'+(c?' on':'');
+ $('vote').textContent=v+' dari 3';$('rt').textContent=st.rt===null?'-':st.rt.toFixed(1)+' detik';
+ $('wl').textContent=Math.round(st.water*100)+'%';
+ const vd=verdict();$('vd').textContent=vd[0];$('vd').style.color=vd[0][0]=='L'?'var(--ok)':vd[0][0]=='G'?'var(--hot)':'';
+ if(vd[1]&&st.fin===null){st.fin=st.t;res.push(NM[st.sc]+': '+vd[0]);$('res').textContent=res.join('\n')}
+ if(st.fin!==null&&queue.length&&st.t-st.fin>2)start(queue.shift());
+ $('st').textContent=st.tOut!==null&&!st.burning?(st.alarm||st.pump?'Api padam, sistem menutup':'Api padam, siaga lagi'):st.pump?'Alarm aktif, pompa menyala':st.alarm?'Alarm aktif, pompa mati (air habis)':st.burning?'Api terdeteksi sebagian ('+v+' sensor)':st.act?NM[st.sc]+': '+v+' dari 3 sensor':'Siaga';
+ // 3D
+ sun.visible=!!(st.act&&(cur.flame||(cur.temp&&!cur.mq)));sun.material.color.setHex(cur.flame?0xffd24a:0xff7a30);flame.visible=st.fire>.01;const f=st.fire,fk=1+Math.sin(st.t*18)*.12+Math.sin(st.t*31)*.08;
+ flame.scale.set(f*fk*1.1,f*fk*1.5,f*fk*1.1);flame.rotation.y=st.t*3;fl.intensity=f*1.8*fk;
+ water.scale.y=st.water*1.4;water.position.y=.2+st.water*.7;
+ setE(sensors.f1.lens,a?0xff2200:0,a?1:0);setE(sensors.f2.lens,a?0xff2200:0,a?1:0);
+ const blink=Math.sin(st.t*14)>0;
+ setE(led,st.alarm?0xff2020:0,st.alarm&&blink?1.5:0);setE(buzz,st.alarm&&blink?0xffaa00:0,.6);
+ setE(relayLed,st.pump?0x33ff77:0,st.pump?1.5:0);
+ pumpCap.material.color.setHex(st.pump?0x4cc38a:0x888f99);
+ // air
+ const wa=wg.attributes.position.array;
+ for(let i=0;i<N;i++){
+  if(wl[i]<=0){wl[i]+=dt;wa[i*3+1]=-50;if(wl[i]>0&&!st.pump)wl[i]=-.2;continue}
+  if(wp[i*3+1]<.15||wl[i]>2){
+   if(st.pump){wp[i*3]=3.5;wp[i*3+1]=2.4;wp[i*3+2]=1.2;const ang=Math.random()*6.28,sp2=Math.random()*1.3;wv[i*3]=Math.cos(ang)*sp2;wv[i*3+1]=-1-Math.random();wv[i*3+2]=Math.sin(ang)*sp2;wl[i]=.01}
+   else{wl[i]=-Math.random()*.3;wp[i*3+1]=-50}
+   continue}
+  wl[i]+=dt;wv[i*3+1]-=4*dt;wp[i*3]+=wv[i*3]*dt;wp[i*3+1]+=wv[i*3+1]*dt;wp[i*3+2]+=wv[i*3+2]*dt}
+ wg.attributes.position.needsUpdate=true;
+ // asap
+ const smk=Math.max(st.fire,(st.act&&cur.mq)?.6:0),sa=sg.attributes.position.array;
+ for(let i=0;i<K;i++){sl[i]+=dt*.35;
+  if(sl[i]>1){sl[i]=0;if(smk>.1){sa[i*3]=3.5+(Math.random()-.5)*.3;sa[i*3+1]=1.2;sa[i*3+2]=1.2+(Math.random()-.5)*.3}else sa[i*3+1]=-50}
+  else if(sa[i*3+1]>-40){sa[i*3+1]+=dt*.9;sa[i*3]+=Math.sin(st.t+i)*dt*.2}}
+ sg.attributes.position.needsUpdate=true;spts.material.opacity=Math.min(.4,.1+smk*.3);
+}
+function size(){const w=innerWidth,h=innerHeight;R.setSize(w,h,false);C.aspect=w/h;C.updateProjectionMatrix()}
+addEventListener('resize',size);size();
+const clk=new T.Clock(),v=new T.Vector3();
+function loop(){requestAnimationFrame(loop);step(Math.min(clk.getDelta(),.05));cam();R.render(S,C);
+ if(showL){const w=innerWidth,h=innerHeight;lbs.forEach(l=>{v.copy(l.p).project(C);const vis=v.z<1;l.d.style.display=vis?'':'none';l.d.style.left=((v.x+1)/2*w)+'px';l.d.style.top=((1-v.y)/2*h)+'px'})}}
+loop();
+</script>
+</body>
+</html>
