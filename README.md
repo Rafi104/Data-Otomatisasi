@@ -17,3 +17,15 @@ Bila minimal 2 dari 3 sensor mendukung, alarm (buzzer dan LED merah) aktif dan r
 Sensor ultrasonik HC-SR04 memantau level air tandon. Pompa dilarang menyala bila air tinggal 5% atau kurang, dan peringatan muncul saat air di bawah 20%.
 Setelah api padam atau semua sensor kembali normal, pompa dan alarm menutup otomatis dan sistem siaga lagi.
 Data dikirim ke dashboard (telemetri bergaya MQTT pada simulasi).
+
+
+Keterbatasan
+Hasil berasal dari simulasi dan belum divalidasi pada prototipe fisik.
+Voting 2 dari 3 masih dapat memicu alarm palsu (lihat skenario 7).
+Komponen hobi tidak bersertifikat dan tidak dirancang untuk keselamatan jiwa. Sistem ini hanya prototipe pembelajaran, bukan pengganti proteksi kebakaran standar.
+Isi ulang tandon air masih manual.
+Rencana pengembangan
+Pengujian dan pengambilan data pada maket fisik.
+Model klasifikasi sederhana (decision tree) dari data sensor nyata untuk mengurangi alarm palsu.
+Isi ulang air otomatis dengan pengaman float switch.
+Dashboard IoT real-time (Blynk atau ThingsBoard).
